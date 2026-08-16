@@ -60,13 +60,13 @@ jobs:
           # Python jsonschema, not check-jsonschema: the OASIS schema's own
           # language regex is invalid under strict ECMA regex checking, which
           # check-jsonschema enforces and rejects.
-          uvx --with jsonschema python3 -c "
+          uv run --no-project --with jsonschema python - <<'PY'
           import json, jsonschema, os
           schema = json.load(open('/tmp/sarif-schema.json'))
           doc = json.load(open(os.environ['SARIF']))
           jsonschema.validate(doc, schema)
           print('SARIF valid against OASIS 2.1.0 schema')
-          "
+          PY
 
   clean:
     name: Self-test on the clean control
