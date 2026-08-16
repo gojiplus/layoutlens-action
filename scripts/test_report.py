@@ -115,6 +115,31 @@ def main() -> int:
         assert json.loads(merged2.read_text())["runs"][0]["results"] == []
         assert "no deterministic findings" in summary.read_text()
 
+    # Annotation escaping: newlines/percent/colon/comma must never break the
+    # workflow-command syntax, and the file property must be escaped too.
+    import contextlib
+    import io
+
+    tricky = {
+        "ruleId": "layout/contrast",
+        "message": {"text": "line1\nline2 100% bad"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "pages/a,b:c.html"}
+                },
+                "logicalLocations": [{"name": "#x", "kind": "element"}],
+            }
+        ],
+    }
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        report.annotate([tricky])
+    line = buf.getvalue().strip()
+    assert line.startswith("::warning file=pages/a%2Cb%3Ac.html,title=layoutlens::"), line
+    assert "%0A" in line and "100%25" in line, line
+    assert "\n" not in line
+
     print("test_report.py: all assertions passed")
     return 0
 

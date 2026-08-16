@@ -82,14 +82,28 @@ runs:
         LL_SOURCES: ${{ inputs.sources }}
         LL_CHECKS: ${{ inputs.checks }}
         LL_VIEWPORT: ${{ inputs.viewport }}
+        LL_FAIL_ON: ${{ inputs.fail-on }}
       run: |
         set -euo pipefail
+        # Validate enum inputs up front: a typo like `checks: bogus` must be
+        # a loud error, not a scan of nothing reported as zero findings.
+        case "$LL_CHECKS" in
+          a11y|layout|both) ;;
+          *) echo "::error::invalid checks '$LL_CHECKS' (a11y|layout|both)"; exit 1 ;;
+        esac
+        case "$LL_FAIL_ON" in
+          nothing|findings) ;;
+          *) echo "::error::invalid fail-on '$LL_FAIL_ON' (nothing|findings)"; exit 1 ;;
+        esac
         outdir="$RUNNER_TEMP/layoutlens-sarif"
         mkdir -p "$outdir"
         i=0
         # Word-splitting and glob expansion of LL_SOURCES are deliberate:
         # the input is documented as whitespace-separated paths/globs/URLs.
         for src in $LL_SOURCES; do
+          case "$src" in
+            -*) echo "::error::source '$src' looks like a CLI option"; exit 1 ;;
+          esac
           i=$((i + 1))
           if [ "$LL_CHECKS" = "a11y" ] || [ "$LL_CHECKS" = "both" ]; then
             layoutlens "$src" --a11y axe --viewport "$LL_VIEWPORT" \
@@ -132,8 +146,13 @@ runs:
         # Fork PRs carry a read-only token; a declined comment must not fail
         # the check — annotations and the job summary still carry the result.
         marker='<!-- layoutlens-action -->'
-        existing=$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-          --jq ".[] | select(.body | startswith(\"$marker\")) | .id" \
+        # --paginate: the default page is 30 comments, after which the sticky
+        # comment becomes invisible and every run posts a duplicate. The
+        # author filter stops a user-posted comment that merely starts with
+        # the marker from being overwritten.
+        existing=$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+          --jq ".[] | select(.user.login == \"github-actions[bot]\")
+                    | select(.body | startswith(\"$marker\")) | .id" \
           2>/dev/null | head -1 || true)
         if [ -n "$existing" ]; then
           gh api -X PATCH "repos/${GH_REPO}/issues/comments/${existing}" \

@@ -102,19 +102,27 @@ def workspace_relative(source: str) -> str | None:
     return source if not path.is_absolute() else None
 
 
+def _escape_message(text: str) -> str:
+    """Escape a workflow-command message (order matters: % first)."""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_property(text: str) -> str:
+    """Escape a workflow-command property value (adds : and ,)."""
+    return _escape_message(text).replace(":", "%3A").replace(",", "%2C")
+
+
 def annotate(results: list[dict]) -> None:
     """Emit one ::warning workflow command per finding."""
     for result in results:
         rule, source, selector, message = result_row(result)
-        # Workflow commands treat some characters as delimiters.
-        text = f"[{rule}] {selector}: {message}".replace("\n", " ").replace(
-            "%", "%25"
-        )
+        text = _escape_message(f"[{rule}] {selector}: {message}")
         rel = workspace_relative(source)
         if rel:
-            print(f"::warning file={rel},title=layoutlens::{text}")
+            print(f"::warning file={_escape_property(rel)},title=layoutlens::{text}")
         else:
-            print(f"::warning title=layoutlens ({source})::{text}")
+            title = _escape_property(f"layoutlens ({source})")
+            print(f"::warning title={title}::{text}")
 
 
 def tables(results: list[dict], viewport: str) -> tuple[str, str]:

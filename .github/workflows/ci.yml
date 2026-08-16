@@ -47,9 +47,13 @@ jobs:
           set -euo pipefail
           echo "findings=$FINDINGS"
           test "$FINDINGS" -ge 5
-          grep -q "layout/page-overflow" "$SARIF"
-          grep -q "axe/image-alt" "$SARIF"
-          grep -q "layout/truncation" "$SARIF"
+          # Every planted defect class must be detected — a regression in any
+          # single detector must not hide behind the total count.
+          for rule in layout/contrast layout/clipping layout/viewport-protrusion \
+                      layout/page-overflow layout/truncation layout/target-size \
+                      axe/image-alt axe/color-contrast axe/html-has-lang; do
+            grep -q "$rule" "$SARIF" || { echo "::error::missing $rule"; exit 1; }
+          done
       - name: Validate SARIF against the OASIS 2.1.0 schema
         env:
           SARIF: ${{ steps.scan.outputs.sarif-file }}
@@ -109,6 +113,38 @@ jobs:
         run: |
           set -euo pipefail
           test "$OUTCOME" = "failure"
+
+  invalid-inputs:
+    name: Invalid inputs fail loudly
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Bogus checks value (expected to fail)
+        id: badchecks
+        continue-on-error: true
+        uses: ./
+        with:
+          sources: fixtures/clean.html
+          checks: bogus
+          sarif-upload: "false"
+          pr-comment: "false"
+      - name: Option-like source (expected to fail)
+        id: badsource
+        continue-on-error: true
+        uses: ./
+        with:
+          sources: "--help"
+          sarif-upload: "false"
+          pr-comment: "false"
+      - name: Assert both failed
+        env:
+          C1: ${{ steps.badchecks.outcome }}
+          C2: ${{ steps.badsource.outcome }}
+        run: |
+          set -euo pipefail
+          test "$C1" = "failure"
+          test "$C2" = "failure"
 
   actionlint:
     runs-on: ubuntu-latest
