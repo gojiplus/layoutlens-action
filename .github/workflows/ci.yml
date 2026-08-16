@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"  # weekly: catch layoutlens/chromium ecosystem drift
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: report.py unit assertions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run assertions
+        run: python3 scripts/test_report.py
+
+  defect:
+    name: Self-test on planted defects
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write  # sticky comment on PRs of this repo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the action on the defect fixture
+        id: scan
+        uses: ./
+        with:
+          sources: fixtures/defect.html
+          sarif-upload: "false"
+      - name: Assert findings and SARIF contents
+        env:
+          FINDINGS: ${{ steps.scan.outputs.findings }}
+          SARIF: ${{ steps.scan.outputs.sarif-file }}
+        run: |
+          set -euo pipefail
+          echo "findings=$FINDINGS"
+          test "$FINDINGS" -ge 5
+          grep -q "layout/page-overflow" "$SARIF"
+          grep -q "axe/image-alt" "$SARIF"
+          grep -q "layout/truncation" "$SARIF"
+      - name: Validate SARIF against the OASIS 2.1.0 schema
+        env:
+          SARIF: ${{ steps.scan.outputs.sarif-file }}
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/sarif-schema.json \
+            https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json
+          # uv is on PATH: the composite action installed it in this job.
+          uvx check-jsonschema --schemafile /tmp/sarif-schema.json "$SARIF"
+
+  clean:
+    name: Self-test on the clean control
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the action on the clean fixture
+        id: scan
+        uses: ./
+        with:
+          sources: fixtures/clean.html
+          sarif-upload: "false"
+          pr-comment: "false"
+      - name: Assert zero findings
+        env:
+          FINDINGS: ${{ steps.scan.outputs.findings }}
+        run: |
+          set -euo pipefail
+          test "$FINDINGS" -eq 0
+
+  fail-mode:
+    name: fail-on findings gates the step
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run with fail-on findings (expected to fail)
+        id: scan
+        continue-on-error: true
+        uses: ./
+        with:
+          sources: fixtures/defect.html
+          fail-on: findings
+          sarif-upload: "false"
+          pr-comment: "false"
+      - name: Assert the step failed
+        env:
+          OUTCOME: ${{ steps.scan.outcome }}
+        run: |
+          set -euo pipefail
+          test "$OUTCOME" = "failure"
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint workflow files and the action manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          url=$(gh api repos/rhysd/actionlint/releases/latest \
+            --jq '.assets[] | select(.name | test("linux_amd64\\.tar\\.gz$")) | .browser_download_url')
+          if [ -z "$url" ]; then
+            echo "::error::could not resolve an actionlint release asset"
+            exit 1
+          fi
+          curl -sSfL "$url" | tar xz actionlint
+          ./actionlint .github/workflows/*.yml
+
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Zizmor (Actions security lint)
+        run: uvx zizmor --min-severity high .github/workflows/ action.yml

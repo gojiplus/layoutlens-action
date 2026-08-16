@@ -1,0 +1,159 @@
+name: "LayoutLens UI Checks"
+description: >-
+  Keyless, deterministic accessibility (axe-core WCAG A/AA) and layout
+  (contrast, overlap, clipping, overflow, truncation, tap-target) checks on
+  rendered pages. No API key, no secrets — safe on every fork's pull requests.
+  Emits a job summary, PR annotations, a sticky comment, and SARIF for GitHub
+  Code Scanning.
+author: gojiplus
+branding:
+  icon: eye
+  color: purple
+
+inputs:
+  sources:
+    description: >-
+      Whitespace-separated page sources: local HTML file paths, globs, or
+      URLs.
+    required: true
+  checks:
+    description: "Which deterministic checks to run: a11y, layout, or both."
+    required: false
+    default: both
+  viewport:
+    description: "Viewport for rendering: desktop, mobile, or tablet."
+    required: false
+    default: desktop
+  fail-on:
+    description: >-
+      When to fail the step: "nothing" (default; report only) or "findings"
+      (fail if any deterministic finding was measured).
+    required: false
+    default: nothing
+  sarif-upload:
+    description: >-
+      Upload the merged SARIF to GitHub Code Scanning (requires the caller to
+      grant "security-events: write").
+    required: false
+    default: "true"
+  pr-comment:
+    description: >-
+      Maintain one sticky results comment on the pull request (requires
+      "pull-requests: write"; degrades gracefully on fork PRs).
+    required: false
+    default: "true"
+  layoutlens-version:
+    description: "layoutlens release to run (pinned per action release)."
+    required: false
+    default: "2.0.0"
+  python-version:
+    description: "Python version for the layoutlens tool install."
+    required: false
+    default: "3.12"
+
+outputs:
+  findings:
+    description: "Total number of deterministic findings across all sources."
+    value: ${{ steps.report.outputs.findings }}
+  sarif-file:
+    description: "Path to the merged SARIF file."
+    value: ${{ steps.report.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install layoutlens
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install layoutlens and chromium
+      shell: bash
+      env:
+        LL_VERSION: ${{ inputs.layoutlens-version }}
+      run: |
+        set -euo pipefail
+        uv tool install "layoutlens==${LL_VERSION}"
+        uvx --from "layoutlens==${LL_VERSION}" playwright install --with-deps chromium
+
+    - name: Run deterministic checks
+      shell: bash
+      env:
+        LL_SOURCES: ${{ inputs.sources }}
+        LL_CHECKS: ${{ inputs.checks }}
+        LL_VIEWPORT: ${{ inputs.viewport }}
+      run: |
+        set -euo pipefail
+        outdir="$RUNNER_TEMP/layoutlens-sarif"
+        mkdir -p "$outdir"
+        i=0
+        # Word-splitting and glob expansion of LL_SOURCES are deliberate:
+        # the input is documented as whitespace-separated paths/globs/URLs.
+        for src in $LL_SOURCES; do
+          i=$((i + 1))
+          if [ "$LL_CHECKS" = "a11y" ] || [ "$LL_CHECKS" = "both" ]; then
+            layoutlens "$src" --a11y axe --viewport "$LL_VIEWPORT" \
+              --output sarif > "$outdir/a11y-$i.sarif"
+          fi
+          if [ "$LL_CHECKS" = "layout" ] || [ "$LL_CHECKS" = "both" ]; then
+            layoutlens "$src" --layout deterministic --viewport "$LL_VIEWPORT" \
+              --output sarif > "$outdir/layout-$i.sarif"
+          fi
+        done
+        echo "Scanned $i source(s)"
+
+    - name: Build report (summary, annotations, comment, outputs)
+      id: report
+      shell: bash
+      env:
+        LL_VIEWPORT: ${{ inputs.viewport }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/scripts/report.py" \
+          "$RUNNER_TEMP/layoutlens-sarif" "$RUNNER_TEMP/layoutlens.sarif"
+
+    - name: Upload SARIF to Code Scanning
+      if: inputs.sarif-upload == 'true'
+      uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      with:
+        sarif_file: ${{ steps.report.outputs.sarif-file }}
+        category: layoutlens
+
+    - name: Sticky PR comment
+      if: inputs.pr-comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        COMMENT_FILE: ${{ steps.report.outputs.comment-file }}
+      run: |
+        set -euo pipefail
+        # Fork PRs carry a read-only token; a declined comment must not fail
+        # the check — annotations and the job summary still carry the result.
+        marker='<!-- layoutlens-action -->'
+        existing=$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+          --jq ".[] | select(.body | startswith(\"$marker\")) | .id" \
+          2>/dev/null | head -1 || true)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/${GH_REPO}/issues/comments/${existing}" \
+            -F body=@"$COMMENT_FILE" >/dev/null \
+            || echo "::notice::could not update the PR comment (read-only token?)"
+        else
+          gh api -X POST "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            -F body=@"$COMMENT_FILE" >/dev/null \
+            || echo "::notice::could not create a PR comment (read-only token?)"
+        fi
+
+    - name: Verdict
+      shell: bash
+      env:
+        LL_FAIL_ON: ${{ inputs.fail-on }}
+        LL_FINDINGS: ${{ steps.report.outputs.findings }}
+      run: |
+        set -euo pipefail
+        if [ "$LL_FAIL_ON" = "findings" ] && [ "$LL_FINDINGS" -gt 0 ]; then
+          echo "::error::layoutlens measured $LL_FINDINGS finding(s) and fail-on=findings"
+          exit 1
+        fi
+        echo "findings: $LL_FINDINGS (fail-on: $LL_FAIL_ON)"
