@@ -57,8 +57,16 @@ jobs:
           set -euo pipefail
           curl -sSfL -o /tmp/sarif-schema.json \
             https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json
-          # uv is on PATH: the composite action installed it in this job.
-          uvx check-jsonschema --schemafile /tmp/sarif-schema.json "$SARIF"
+          # Python jsonschema, not check-jsonschema: the OASIS schema's own
+          # language regex is invalid under strict ECMA regex checking, which
+          # check-jsonschema enforces and rejects.
+          uvx --with jsonschema python3 -c "
+          import json, jsonschema, os
+          schema = json.load(open('/tmp/sarif-schema.json'))
+          doc = json.load(open(os.environ['SARIF']))
+          jsonschema.validate(doc, schema)
+          print('SARIF valid against OASIS 2.1.0 schema')
+          "
 
   clean:
     name: Self-test on the clean control
