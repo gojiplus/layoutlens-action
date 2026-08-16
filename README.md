@@ -106,3 +106,5 @@ model noise — reasonable to make a required status check.
 - Passing axe-core is **not** WCAG conformance; automated rules cover a
   subset. See layoutlens's
   [Limitations](https://github.com/gojiplus/layoutlens#limitations).
+
+<!-- demo: exercises the PR comment path -->
