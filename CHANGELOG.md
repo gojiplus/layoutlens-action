@@ -1,16 +1,14 @@
 # Changelog
 
-## 2.0.0 (unreleased)
+## [Unreleased]
+
+## [2.0.0] - 2026-09-12
 
 - Target LayoutLens 3.0.0 and Python 3.12+.
 - Add baseline/candidate structured comparisons, qualified/warning defaults,
   explicit strict gates, and incomplete-evidence outputs.
 - Preserve baseline statuses and gate evidence through SARIF reporting.
 - Add a candidate-wheel input for release-contract validation.
-
-## [Unreleased]
-
-_Nothing yet._
 
 ## [1.0.0] - 2026-08-15
 

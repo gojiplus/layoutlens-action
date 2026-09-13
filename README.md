@@ -36,14 +36,14 @@ jobs:
       contents: read
       pull-requests: write   # for the sticky comment (optional)
     steps:
-      - uses: actions/checkout@v6
-      - uses: gojiplus/layoutlens-action@v1
+      - uses: actions/checkout@v7
+      - uses: gojiplus/layoutlens-action@v2
         with:
           sources: "dist/index.html dist/pricing.html"
           sarif-upload: "false"
 ```
 
-Non-blocking by default: findings are reported, the job stays green.
+Unqualified layout findings warn by default. Incomplete evidence fails the job.
 
 ## With GitHub Code Scanning
 
@@ -53,8 +53,8 @@ Non-blocking by default: findings are reported, the job stays green.
       security-events: write   # required for SARIF upload
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: gojiplus/layoutlens-action@v1
+      - uses: actions/checkout@v7
+      - uses: gojiplus/layoutlens-action@v2
         with:
           sources: "dist/*.html"
 ```
@@ -65,7 +65,7 @@ over-time tracking; on PRs, GitHub flags which findings are *new*.
 ## As a required gate
 
 ```yaml
-      - uses: gojiplus/layoutlens-action@v1
+      - uses: gojiplus/layoutlens-action@v2
         with:
           sources: "dist/*.html"
           fail-on: findings      # any measured finding fails the step
@@ -82,7 +82,9 @@ every finding is a verified defect.
 
 | Input | Default | Description |
 |---|---|---|
-| `sources` | *(required)* | Whitespace-separated HTML file paths, globs, or URLs |
+| `sources` | empty | Whitespace-separated HTML file paths, globs, or URLs; required in scan mode |
+| `baseline` | empty | Baseline artifact directory, HTML file, or URL; requires `candidate` and replaces `sources` |
+| `candidate` | empty | Candidate artifact directory, HTML file, or URL; requires `baseline` |
 | `checks` | `both` | `a11y`, `layout`, or `both` |
 | `viewport` | `desktop` | `desktop`, `mobile`, or `tablet` |
 | `fail-on` | `qualified` | `qualified`, `nothing` (report only), or `findings` (strict) |
@@ -96,6 +98,8 @@ every finding is a verified defect.
 | Output | Description |
 |---|---|
 | `findings` | Total deterministic findings across all sources |
+| `blocking` | Number of findings selected for blocking by the policy |
+| `incomplete` | Whether capture or comparison evidence is incomplete |
 | `sarif-file` | Path to the merged SARIF 2.1.0 file |
 
 ## Notes
@@ -134,4 +138,3 @@ No LayoutLens rule ships with independent gate qualification yet; candidate
 findings remain warnings unless strict policy is selected.
 
 `layoutlens-package` accepts a locally built wheel for release-contract tests.
-Release the LayoutLens wheel before publishing Action v2.
