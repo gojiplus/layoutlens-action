@@ -37,7 +37,7 @@ jobs:
       pull-requests: write   # for the sticky comment (optional)
     steps:
       - uses: actions/checkout@v7
-      - uses: gojiplus/layoutlens-action@v2
+      - uses: gojiplus/layoutlens-action@v3
         with:
           sources: "dist/index.html dist/pricing.html"
           sarif-upload: "false"
@@ -54,7 +54,7 @@ Unqualified layout findings warn by default. Incomplete evidence fails the job.
       pull-requests: write
     steps:
       - uses: actions/checkout@v7
-      - uses: gojiplus/layoutlens-action@v2
+      - uses: gojiplus/layoutlens-action@v3
         with:
           sources: "dist/*.html"
 ```
@@ -65,7 +65,7 @@ over-time tracking; on PRs, GitHub flags which findings are *new*.
 ## As a required gate
 
 ```yaml
-      - uses: gojiplus/layoutlens-action@v2
+      - uses: gojiplus/layoutlens-action@v3
         with:
           sources: "dist/*.html"
           fail-on: findings      # any measured finding fails the step
@@ -115,14 +115,14 @@ every finding is a verified defect.
   [Limitations](https://github.com/gojiplus/layoutlens#limitations).
 
 
-## Structured regression comparison (v2)
+## Structured regression comparison (v3)
 
-This breaking Action release targets LayoutLens 3 and Python 3.12+.
+This breaking Action release targets LayoutLens 4 and Python 3.12+.
 Capture and save render states with `layoutlens capture SOURCE --save DIRECTORY`.
 Provide the baseline and candidate artifacts together:
 
 ```yaml
-- uses: gojiplus/layoutlens-action@v2
+- uses: gojiplus/layoutlens-action@v3
   with:
     baseline: artifacts/baseline
     candidate: artifacts/candidate
@@ -138,3 +138,6 @@ No LayoutLens rule ships with independent gate qualification yet; candidate
 findings remain warnings unless strict policy is selected.
 
 `layoutlens-package` accepts a locally built wheel for release-contract tests.
+
+Action v3 runs LayoutLens 4 and requires RenderState schema 2 baselines.
+Recapture artifacts saved by LayoutLens 3 before upgrading.
