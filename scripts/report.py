@@ -32,8 +32,7 @@ def load_runs(sarif_dir: Path) -> list[dict]:
         try:
             log = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
-            print(f"::warning::skipping unreadable SARIF {path.name}: {e}")
-            continue
+            raise ValueError(f"unreadable SARIF {path.name}: {e}") from e
         runs.extend(log.get("runs", []))
     return runs
 
@@ -66,6 +65,17 @@ def merge(runs: list[dict]) -> dict:
                     }
                 },
                 "results": all_results,
+                "properties": {
+                    "incomplete": not runs
+                    or any(
+                        r.get("properties", {}).get("gate_status") == "incomplete"
+                        or any(
+                            not i.get("executionSuccessful", True)
+                            for i in r.get("invocations", [])
+                        )
+                        for r in runs
+                    )
+                },
             }
         ],
     }
@@ -78,9 +88,7 @@ def result_row(result: dict) -> tuple[str, str, str, str]:
     source, selector = "?", "?"
     for loc in result.get("locations", [])[:1]:
         source = (
-            loc.get("physicalLocation", {})
-            .get("artifactLocation", {})
-            .get("uri", "?")
+            loc.get("physicalLocation", {}).get("artifactLocation", {}).get("uri", "?")
         )
         logical = loc.get("logicalLocations", [])
         if logical:
@@ -131,9 +139,7 @@ def tables(results: list[dict], viewport: str) -> tuple[str, str]:
     if count == 0:
         verdict = f"✅ **LayoutLens: no deterministic findings** ({viewport} viewport)."
     else:
-        verdict = (
-            f"❌ **LayoutLens measured {count} finding(s)** ({viewport} viewport)."
-        )
+        verdict = f"⚠️ **LayoutLens measured {count} finding(s) requiring review** ({viewport} viewport)."
 
     lines = [verdict, ""]
     if count:
@@ -149,9 +155,11 @@ def tables(results: list[dict], viewport: str) -> tuple[str, str]:
             lines.append(f"| … | | | +{count - 50} more finding(s) |")
     lines += [
         "",
-        "_Deterministic axe-core + geometry checks by"
-        " [layoutlens](https://github.com/gojiplus/layoutlens) — measured"
-        " values, no LLM, no API key._",
+        (
+            "_Deterministic axe-core + geometry checks by"
+            " [layoutlens](https://github.com/gojiplus/layoutlens) — measured"
+            " values, no LLM, no API key._"
+        ),
     ]
     summary_md = "\n".join(lines)
     comment_md = MARKER + "\n" + summary_md
@@ -178,7 +186,11 @@ def main() -> int:
 
     merged_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
 
+    incomplete = merged["runs"][0]["properties"]["incomplete"]
     summary_md, comment_md = tables(results, viewport)
+    if incomplete:
+        summary_md = "**Comparison incomplete: no passing verdict.**\n\n" + summary_md
+        comment_md = MARKER + "\n" + summary_md
     comment_path = merged_path.with_name("comment.md")
     comment_path.write_text(comment_md, encoding="utf-8")
 
@@ -190,6 +202,22 @@ def main() -> int:
     annotate(results)
 
     set_output("findings", str(len(results)))
+    set_output(
+        "blocking",
+        str(
+            sum(
+                bool(r.get("properties", {}).get("gateability", {}).get("blocks"))
+                for r in results
+            )
+        ),
+    )
+    set_output(
+        "regressions",
+        str(
+            sum(r.get("baselineState") not in {"absent", "unchanged"} for r in results)
+        ),
+    )
+    set_output("incomplete", str(incomplete).lower())
     set_output("sarif-file", str(merged_path))
     set_output("comment-file", str(comment_path))
     print(f"findings: {len(results)}; sarif: {merged_path}")

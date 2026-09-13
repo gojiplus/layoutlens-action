@@ -15,7 +15,16 @@ inputs:
     description: >-
       Whitespace-separated page sources: local HTML file paths, globs, or
       URLs.
-    required: true
+    required: false
+  baseline:
+    description: "Baseline RenderState artifact or live source; requires candidate."
+    required: false
+  candidate:
+    description: "Candidate RenderState artifact or live source; requires baseline."
+    required: false
+  layoutlens-package:
+    description: "Optional candidate wheel path for release-contract testing."
+    required: false
   checks:
     description: "Which deterministic checks to run: a11y, layout, or both."
     required: false
@@ -26,10 +35,10 @@ inputs:
     default: desktop
   fail-on:
     description: >-
-      When to fail the step: "nothing" (default; report only) or "findings"
-      (fail if any deterministic finding was measured).
+      Gate policy: qualified (independently qualified regressions), findings
+      (explicit strict policy), or nothing (report only).
     required: false
-    default: nothing
+    default: qualified
   sarif-upload:
     description: >-
       Upload the merged SARIF to GitHub Code Scanning (requires the caller to
@@ -45,13 +54,19 @@ inputs:
   layoutlens-version:
     description: "layoutlens release to run (pinned per action release)."
     required: false
-    default: "2.0.0"
+    default: "3.0.0"
   python-version:
     description: "Python version for the layoutlens tool install."
     required: false
     default: "3.12"
 
 outputs:
+  blocking:
+    description: "Findings selected for blocking by policy."
+    value: ${{ steps.report.outputs.blocking }}
+  incomplete:
+    description: "Whether capture or comparison evidence is incomplete."
+    value: ${{ steps.report.outputs.incomplete }}
   findings:
     description: "Total number of deterministic findings across all sources."
     value: ${{ steps.report.outputs.findings }}
@@ -63,7 +78,7 @@ runs:
   using: composite
   steps:
     - name: Install layoutlens
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -71,15 +86,19 @@ runs:
       shell: bash
       env:
         LL_VERSION: ${{ inputs.layoutlens-version }}
+        LL_PACKAGE: ${{ inputs.layoutlens-package }}
       run: |
         set -euo pipefail
-        uv tool install "layoutlens==${LL_VERSION}"
-        uvx --from "layoutlens==${LL_VERSION}" playwright install --with-deps chromium
+        package="${LL_PACKAGE:-layoutlens==${LL_VERSION}}"
+        uv tool install "$package" --with playwright
+        uvx --from "$package" playwright install --with-deps chromium
 
     - name: Run deterministic checks
       shell: bash
       env:
         LL_SOURCES: ${{ inputs.sources }}
+        LL_BASELINE: ${{ inputs.baseline }}
+        LL_CANDIDATE: ${{ inputs.candidate }}
         LL_CHECKS: ${{ inputs.checks }}
         LL_VIEWPORT: ${{ inputs.viewport }}
         LL_FAIL_ON: ${{ inputs.fail-on }}
@@ -92,11 +111,23 @@ runs:
           *) echo "::error::invalid checks '$LL_CHECKS' (a11y|layout|both)"; exit 1 ;;
         esac
         case "$LL_FAIL_ON" in
-          nothing|findings) ;;
-          *) echo "::error::invalid fail-on '$LL_FAIL_ON' (nothing|findings)"; exit 1 ;;
+          qualified|nothing|findings) ;;
+          *) echo "::error::invalid fail-on '$LL_FAIL_ON' (qualified|nothing|findings)"; exit 1 ;;
         esac
         outdir="$RUNNER_TEMP/layoutlens-sarif"
         mkdir -p "$outdir"
+        if [ -n "$LL_BASELINE" ] || [ -n "$LL_CANDIDATE" ]; then
+          if [ -z "$LL_BASELINE" ] || [ -z "$LL_CANDIDATE" ] || [ -n "$LL_SOURCES" ]; then
+            echo "::error::supply baseline and candidate together, without sources"; exit 2
+          fi
+          status=0
+          layoutlens diff --output sarif --fail-on "$LL_FAIL_ON" --viewport "$LL_VIEWPORT" \
+            -- "$LL_BASELINE" "$LL_CANDIDATE" > "$outdir/diff.sarif" || status=$?
+          if [ "$status" -gt 2 ]; then exit "$status"; fi
+          if [ ! -s "$outdir/diff.sarif" ]; then exit 2; fi
+          exit 0
+        fi
+        if [ -z "$LL_SOURCES" ]; then echo "::error::sources or baseline/candidate required"; exit 2; fi
         i=0
         # Word-splitting and glob expansion of LL_SOURCES are deliberate:
         # the input is documented as whitespace-separated paths/globs/URLs.
@@ -128,7 +159,7 @@ runs:
 
     - name: Upload SARIF to Code Scanning
       if: inputs.sarif-upload == 'true'
-      uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       with:
         sarif_file: ${{ steps.report.outputs.sarif-file }}
         category: layoutlens
@@ -169,9 +200,14 @@ runs:
       env:
         LL_FAIL_ON: ${{ inputs.fail-on }}
         LL_FINDINGS: ${{ steps.report.outputs.findings }}
+        LL_BLOCKING: ${{ steps.report.outputs.blocking }}
+        LL_REGRESSIONS: ${{ steps.report.outputs.regressions }}
+        LL_INCOMPLETE: ${{ steps.report.outputs.incomplete }}
       run: |
         set -euo pipefail
-        if [ "$LL_FAIL_ON" = "findings" ] && [ "$LL_FINDINGS" -gt 0 ]; then
+        if [ "$LL_INCOMPLETE" = "true" ]; then echo "::error::comparison incomplete"; exit 2; fi
+        if [ "$LL_FAIL_ON" = "qualified" ] && [ "$LL_BLOCKING" -gt 0 ]; then exit 1; fi
+        if [ "$LL_FAIL_ON" = "findings" ] && [ "$LL_REGRESSIONS" -gt 0 ]; then
           echo "::error::layoutlens measured $LL_FINDINGS finding(s) and fail-on=findings"
           exit 1
         fi
