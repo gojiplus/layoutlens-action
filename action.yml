@@ -54,7 +54,7 @@ inputs:
   layoutlens-version:
     description: "layoutlens release to run (pinned per action release)."
     required: false
-    default: "3.0.0"
+    default: "4.0.0"
   python-version:
     description: "Python version for the layoutlens tool install."
     required: false

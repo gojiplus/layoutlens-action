@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-12
+
+- Pin LayoutLens 4.0.0. Structured comparisons require schema 2 baselines;
+  recapture older artifacts before upgrading.
+
 ## [2.0.0] - 2026-09-12
 
 - Target LayoutLens 3.0.0 and Python 3.12+.
