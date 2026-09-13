@@ -117,7 +117,7 @@ every finding is a verified defect.
 
 ## Structured regression comparison (v3)
 
-This breaking Action release targets LayoutLens 3 and Python 3.12+.
+This breaking Action release targets LayoutLens 4 and Python 3.12+.
 Capture and save render states with `layoutlens capture SOURCE --save DIRECTORY`.
 Provide the baseline and candidate artifacts together:
 
