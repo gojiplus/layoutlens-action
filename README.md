@@ -36,14 +36,14 @@ jobs:
       contents: read
       pull-requests: write   # for the sticky comment (optional)
     steps:
-      - uses: actions/checkout@v6
-      - uses: gojiplus/layoutlens-action@v1
+      - uses: actions/checkout@v7
+      - uses: gojiplus/layoutlens-action@v2
         with:
           sources: "dist/index.html dist/pricing.html"
           sarif-upload: "false"
 ```
 
-Non-blocking by default: findings are reported, the job stays green.
+Unqualified layout findings warn by default. Incomplete evidence fails the job.
 
 ## With GitHub Code Scanning
 
@@ -53,8 +53,8 @@ Non-blocking by default: findings are reported, the job stays green.
       security-events: write   # required for SARIF upload
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: gojiplus/layoutlens-action@v1
+      - uses: actions/checkout@v7
+      - uses: gojiplus/layoutlens-action@v2
         with:
           sources: "dist/*.html"
 ```
@@ -65,24 +65,29 @@ over-time tracking; on PRs, GitHub flags which findings are *new*.
 ## As a required gate
 
 ```yaml
-      - uses: gojiplus/layoutlens-action@v1
+      - uses: gojiplus/layoutlens-action@v2
         with:
           sources: "dist/*.html"
           fail-on: findings      # any measured finding fails the step
           viewport: mobile
 ```
 
-Because the checks are deterministic, a red gate is a measured defect, never
-model noise — reasonable to make a required status check.
+Browser measurements are reproducible observations. A finding that matches a
+layout predicate is a candidate for review; intentional overlaps and rule
+exceptions can still apply. Default blocking requires independent precision
+evidence. `fail-on: findings` is an explicit strict policy, not a claim that
+every finding is a verified defect.
 
 ## Inputs
 
 | Input | Default | Description |
 |---|---|---|
-| `sources` | *(required)* | Whitespace-separated HTML file paths, globs, or URLs |
+| `sources` | empty | Whitespace-separated HTML file paths, globs, or URLs; required in scan mode |
+| `baseline` | empty | Baseline artifact directory, HTML file, or URL; requires `candidate` and replaces `sources` |
+| `candidate` | empty | Candidate artifact directory, HTML file, or URL; requires `baseline` |
 | `checks` | `both` | `a11y`, `layout`, or `both` |
 | `viewport` | `desktop` | `desktop`, `mobile`, or `tablet` |
-| `fail-on` | `nothing` | `nothing` (report only) or `findings` |
+| `fail-on` | `qualified` | `qualified`, `nothing` (report only), or `findings` (strict) |
 | `sarif-upload` | `true` | Upload SARIF to Code Scanning (needs `security-events: write`) |
 | `pr-comment` | `true` | Sticky results comment on PRs (needs `pull-requests: write`; degrades gracefully on forks) |
 | `layoutlens-version` | pinned per release | layoutlens version to run |
@@ -93,6 +98,8 @@ model noise — reasonable to make a required status check.
 | Output | Description |
 |---|---|
 | `findings` | Total deterministic findings across all sources |
+| `blocking` | Number of findings selected for blocking by the policy |
+| `incomplete` | Whether capture or comparison evidence is incomplete |
 | `sarif-file` | Path to the merged SARIF 2.1.0 file |
 
 ## Notes
@@ -106,3 +113,28 @@ model noise — reasonable to make a required status check.
 - Passing axe-core is **not** WCAG conformance; automated rules cover a
   subset. See layoutlens's
   [Limitations](https://github.com/gojiplus/layoutlens#limitations).
+
+
+## Structured regression comparison (v2)
+
+This breaking Action release targets LayoutLens 3 and Python 3.12+.
+Capture and save render states with `layoutlens capture SOURCE --save DIRECTORY`.
+Provide the baseline and candidate artifacts together:
+
+```yaml
+- uses: gojiplus/layoutlens-action@v2
+  with:
+    baseline: artifacts/baseline
+    candidate: artifacts/candidate
+    fail-on: qualified
+    pr-comment: "false"
+```
+
+`baseline` and `candidate` replace `sources` in comparison mode. URLs and HTML
+files are also accepted. Existing and resolved findings remain in SARIF but
+do not fail a regression gate. Missing coverage or incompatible captures yield
+an incomplete result. `blocking` and `incomplete` are exposed as outputs.
+No LayoutLens rule ships with independent gate qualification yet; candidate
+findings remain warnings unless strict policy is selected.
+
+`layoutlens-package` accepts a locally built wheel for release-contract tests.

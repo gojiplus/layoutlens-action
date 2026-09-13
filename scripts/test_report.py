@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-import report  # noqa: E402
+import report
 
 SAMPLE = {
     "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json",
@@ -20,7 +20,10 @@ SAMPLE = {
                     "informationUri": "https://github.com/gojiplus/layoutlens",
                     "version": "2.0.0",
                     "rules": [
-                        {"id": "layout/page-overflow", "shortDescription": {"text": "x"}}
+                        {
+                            "id": "layout/page-overflow",
+                            "shortDescription": {"text": "x"},
+                        }
                     ],
                 }
             },
@@ -47,14 +50,22 @@ AXE = {
     "version": "2.1.0",
     "runs": [
         {
-            "tool": {"driver": {"name": "LayoutLens", "version": "2.0.0", "rules": [
-                {"id": "axe/image-alt", "shortDescription": {"text": "alt"}}
-            ]}},
+            "tool": {
+                "driver": {
+                    "name": "LayoutLens",
+                    "version": "2.0.0",
+                    "rules": [
+                        {"id": "axe/image-alt", "shortDescription": {"text": "alt"}}
+                    ],
+                }
+            },
             "results": [
                 {
                     "ruleId": "axe/image-alt",
                     "level": "error",
-                    "message": {"text": "Images must have alternative text (selector: img)"},
+                    "message": {
+                        "text": "Images must have alternative text (selector: img)"
+                    },
                     "locations": [
                         {
                             "physicalLocation": {
@@ -70,7 +81,22 @@ AXE = {
 }
 
 
+def test_regression_contract() -> None:
+    """Incomplete evidence survives merging; baseline results remain inspectable."""
+    run = {"properties": {"gate_status": "incomplete"}, "results": []}
+    assert report.merge([run])["runs"][0]["properties"]["incomplete"]
+    assert report.merge([])["runs"][0]["properties"]["incomplete"]
+    run = {
+        "properties": {"gate_status": "pass"},
+        "results": [{"baselineState": "unchanged"}, {"baselineState": "absent"}],
+    }
+    merged = report.merge([run])["runs"][0]
+    assert not merged["properties"]["incomplete"]
+    assert len(merged["results"]) == 2
+
+
 def main() -> int:
+    test_regression_contract()
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         indir = tmpdir / "in"
@@ -125,9 +151,7 @@ def main() -> int:
         "message": {"text": "line1\nline2 100% bad"},
         "locations": [
             {
-                "physicalLocation": {
-                    "artifactLocation": {"uri": "pages/a,b:c.html"}
-                },
+                "physicalLocation": {"artifactLocation": {"uri": "pages/a,b:c.html"}},
                 "logicalLocations": [{"name": "#x", "kind": "element"}],
             }
         ],
@@ -136,7 +160,9 @@ def main() -> int:
     with contextlib.redirect_stdout(buf):
         report.annotate([tricky])
     line = buf.getvalue().strip()
-    assert line.startswith("::warning file=pages/a%2Cb%3Ac.html,title=layoutlens::"), line
+    assert line.startswith("::warning file=pages/a%2Cb%3Ac.html,title=layoutlens::"), (
+        line
+    )
     assert "%0A" in line and "100%25" in line, line
     assert "\n" not in line
 
