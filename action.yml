@@ -58,7 +58,7 @@ inputs:
   python-version:
     description: "Python version for the layoutlens tool install."
     required: false
-    default: "3.12"
+    default: "3.13"
 
 outputs:
   blocking:

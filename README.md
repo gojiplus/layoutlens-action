@@ -91,7 +91,7 @@ every finding is a verified defect.
 | `sarif-upload` | `true` | Upload SARIF to Code Scanning (needs `security-events: write`) |
 | `pr-comment` | `true` | Sticky results comment on PRs (needs `pull-requests: write`; degrades gracefully on forks) |
 | `layoutlens-version` | pinned per release | layoutlens version to run |
-| `python-version` | `3.12` | Python for the tool install |
+| `python-version` | `3.13` | Python for the tool install |
 
 ## Outputs
 

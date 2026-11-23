@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- The default `python-version` is 3.13, the floor LayoutLens now requires.
+
 ## [3.0.0] - 2026-09-12
 
 - Pin LayoutLens 4.0.0. Structured comparisons require schema 2 baselines;
